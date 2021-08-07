@@ -103,9 +103,8 @@ function createControlledTypeScriptSystem(
 
     const fileWatcherCallbacks = fileWatcherCallbacksMap.get(normalizedPath);
     if (fileWatcherCallbacks) {
-      // typescript expects normalized paths with posix forward slash
       fileWatcherCallbacks.forEach((fileWatcherCallback) =>
-        fileWatcherCallback(forwardSlash(normalizedPath), event)
+        fileWatcherCallback(normalizedPath, event)
       );
     }
   }
@@ -121,7 +120,7 @@ function createControlledTypeScriptSystem(
     const directoryWatcherCallbacks = directoryWatcherCallbacksMap.get(directory);
     if (directoryWatcherCallbacks) {
       directoryWatcherCallbacks.forEach((directoryWatcherCallback) =>
-        directoryWatcherCallback(forwardSlash(normalizedPath))
+        directoryWatcherCallback(normalizedPath)
       );
     }
 
@@ -133,7 +132,7 @@ function createControlledTypeScriptSystem(
             forwardSlash(directory)[watchedDirectory.length] === '/')
         ) {
           recursiveDirectoryWatcherCallbacks.forEach((recursiveDirectoryWatcherCallback) =>
-            recursiveDirectoryWatcherCallback(forwardSlash(normalizedPath))
+            recursiveDirectoryWatcherCallback(normalizedPath)
           );
         }
       }
