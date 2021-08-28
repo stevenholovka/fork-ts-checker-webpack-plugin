@@ -1,4 +1,4 @@
-import type * as ts from 'typescript';
+import * as ts from 'typescript';
 import { normalize, dirname, basename, resolve, relative } from 'path';
 import { TypeScriptConfigurationOverwrite } from '../TypeScriptConfigurationOverwrite';
 import { FilesMatch } from '../../reporter';
@@ -43,40 +43,33 @@ function parseTypeScriptConfiguration(
 function getDependenciesFromTypeScriptConfiguration(
   typescript: typeof ts,
   parsedConfiguration: ts.ParsedCommandLine,
-  configFileContext: string,
   parseConfigFileHost: ts.ParseConfigFileHost,
   processedConfigFiles: string[] = []
 ): FilesMatch {
   const files = new Set<string>(parsedConfiguration.fileNames);
-  const configFilePath = parsedConfiguration.options.configFilePath;
-  if (typeof configFilePath === 'string') {
-    files.add(configFilePath);
+  if (typeof parsedConfiguration.options.configFilePath === 'string') {
+    files.add(parsedConfiguration.options.configFilePath);
   }
   const dirs = new Set(Object.keys(parsedConfiguration.wildcardDirectories || {}));
-  const excluded = new Set<string>(
-    (parsedConfiguration.raw?.exclude || []).map((path: string) => resolve(configFileContext, path))
-  );
 
   for (const projectReference of parsedConfiguration.projectReferences || []) {
-    const childConfigFilePath = typescript.resolveProjectReferencePath(projectReference);
-    const childConfigContext = dirname(childConfigFilePath);
-    if (processedConfigFiles.includes(childConfigFilePath)) {
+    const configFile = typescript.resolveProjectReferencePath(projectReference);
+    if (processedConfigFiles.includes(configFile)) {
       // handle circular dependencies
       continue;
     }
-    const childParsedConfiguration = parseTypeScriptConfiguration(
+    const parsedConfiguration = parseTypeScriptConfiguration(
       typescript,
-      childConfigFilePath,
-      childConfigContext,
+      configFile,
+      dirname(configFile),
       {},
       parseConfigFileHost
     );
     const childDependencies = getDependenciesFromTypeScriptConfiguration(
       typescript,
-      childParsedConfiguration,
-      childConfigContext,
+      parsedConfiguration,
       parseConfigFileHost,
-      [...processedConfigFiles, childConfigFilePath]
+      [...processedConfigFiles, configFile]
     );
     childDependencies.files.forEach((file) => {
       files.add(file);
@@ -97,7 +90,6 @@ function getDependenciesFromTypeScriptConfiguration(
   return {
     files: Array.from(files).map((file) => normalize(file)),
     dirs: Array.from(dirs).map((dir) => normalize(dir)),
-    excluded: Array.from(excluded).map((path) => normalize(path)),
     extensions: extensions,
   };
 }
@@ -114,10 +106,10 @@ function removeJsonExtension(path: string) {
   }
 }
 
-function getTsBuildInfoEmitOutputFilePath(typescript: typeof ts, options: ts.CompilerOptions) {
-  if (typeof typescript.getTsBuildInfoEmitOutputFilePath === 'function') {
+function getTsBuildInfoEmitOutputFilePath(options: ts.CompilerOptions) {
+  if (typeof ts.getTsBuildInfoEmitOutputFilePath === 'function') {
     // old TypeScript version doesn't provides this method
-    return typescript.getTsBuildInfoEmitOutputFilePath(options);
+    return ts.getTsBuildInfoEmitOutputFilePath(options);
   }
 
   // based on the implementation from typescript
@@ -159,10 +151,7 @@ function getArtifactsFromTypeScriptConfiguration(
     if (parsedConfiguration.options.outFile) {
       files.add(resolve(configFileContext, parsedConfiguration.options.outFile));
     }
-    const tsBuildInfoPath = getTsBuildInfoEmitOutputFilePath(
-      typescript,
-      parsedConfiguration.options
-    );
+    const tsBuildInfoPath = getTsBuildInfoEmitOutputFilePath(parsedConfiguration.options);
     if (tsBuildInfoPath) {
       files.add(resolve(configFileContext, tsBuildInfoPath));
     }
@@ -209,7 +198,6 @@ function getArtifactsFromTypeScriptConfiguration(
   return {
     files: Array.from(files).map((file) => normalize(file)),
     dirs: Array.from(dirs).map((dir) => normalize(dir)),
-    excluded: [],
     extensions,
   };
 }

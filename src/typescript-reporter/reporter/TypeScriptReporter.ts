@@ -1,4 +1,4 @@
-import type * as ts from 'typescript';
+import * as ts from 'typescript';
 import path from 'path';
 import { FilesMatch, Reporter } from '../../reporter';
 import { createIssuesFromTsDiagnostics } from '../issue/TypeScriptIssueFactory';
@@ -19,6 +19,7 @@ import {
 } from './TypeScriptConfigurationParser';
 import { createPerformance } from '../../profile/Performance';
 import { connectTypeScriptPerformance } from '../profile/TypeScriptPerformance';
+import { createControlledCompilerHost } from './ControlledCompilerHost';
 
 // write this type as it's available only in the newest TypeScript versions (^4.1.0)
 interface Tracing {
@@ -33,12 +34,14 @@ function createTypeScriptReporter(configuration: TypeScriptReporterConfiguration
   let dependencies: FilesMatch | undefined;
   let artifacts: FilesMatch | undefined;
   let configurationChanged = false;
+  let compilerHost: ts.CompilerHost | undefined;
   let watchCompilerHost:
     | ts.WatchCompilerHostOfFilesAndCompilerOptions<ts.SemanticDiagnosticsBuilderProgram>
     | undefined;
   let watchSolutionBuilderHost:
     | ts.SolutionBuilderWithWatchHost<ts.SemanticDiagnosticsBuilderProgram>
     | undefined;
+  let program: ts.Program | undefined;
   let watchProgram:
     | ts.WatchOfFilesAndCompilerOptions<ts.SemanticDiagnosticsBuilderProgram>
     | undefined;
@@ -72,27 +75,27 @@ function createTypeScriptReporter(configuration: TypeScriptReporterConfiguration
     return (typescript as any).tracing;
   }
 
-  function getDiagnosticsOfBuilderProgram(builderProgram: ts.BuilderProgram) {
+  function getDiagnosticsOfProgram(program: ts.Program | ts.BuilderProgram) {
     const diagnostics: ts.Diagnostic[] = [];
 
     if (configuration.diagnosticOptions.syntactic) {
       performance.markStart('Syntactic Diagnostics');
-      diagnostics.push(...builderProgram.getSyntacticDiagnostics());
+      diagnostics.push(...program.getSyntacticDiagnostics());
       performance.markEnd('Syntactic Diagnostics');
     }
     if (configuration.diagnosticOptions.global) {
       performance.markStart('Global Diagnostics');
-      diagnostics.push(...builderProgram.getGlobalDiagnostics());
+      diagnostics.push(...program.getGlobalDiagnostics());
       performance.markEnd('Global Diagnostics');
     }
     if (configuration.diagnosticOptions.semantic) {
       performance.markStart('Semantic Diagnostics');
-      diagnostics.push(...builderProgram.getSemanticDiagnostics());
+      diagnostics.push(...program.getSemanticDiagnostics());
       performance.markEnd('Semantic Diagnostics');
     }
     if (configuration.diagnosticOptions.declaration) {
       performance.markStart('Declaration Diagnostics');
-      diagnostics.push(...builderProgram.getDeclarationDiagnostics());
+      diagnostics.push(...program.getDeclarationDiagnostics());
       performance.markEnd('Declaration Diagnostics');
     }
 
@@ -167,7 +170,6 @@ function createTypeScriptReporter(configuration: TypeScriptReporterConfiguration
     let dependencies = getDependenciesFromTypeScriptConfiguration(
       typescript,
       parsedConfiguration,
-      configuration.context,
       parseConfigFileHost
     );
 
@@ -245,7 +247,7 @@ function createTypeScriptReporter(configuration: TypeScriptReporterConfiguration
   }
 
   return {
-    getReport: async ({ changedFiles = [], deletedFiles = [] }) => {
+    getReport: async ({ changedFiles = [], deletedFiles = [] }, watching) => {
       // clear cache to be ready for next iteration and to free memory
       system.clearCache();
 
@@ -258,23 +260,26 @@ function createTypeScriptReporter(configuration: TypeScriptReporterConfiguration
         parsedConfiguration = undefined;
         dependencies = undefined;
         artifacts = undefined;
+        compilerHost = undefined;
         watchCompilerHost = undefined;
         watchSolutionBuilderHost = undefined;
+        program = undefined;
         watchProgram = undefined;
         solutionBuilder = undefined;
 
         diagnosticsPerProject.clear();
         configurationChanged = true;
       } else {
-        const previousDependencies = dependencies;
+        const previousParsedConfiguration = parsedConfiguration;
         [parsedConfiguration, parseConfigurationDiagnostics] = parseConfiguration();
-        dependencies = getDependencies();
 
         if (
-          previousDependencies &&
-          JSON.stringify(previousDependencies) !== JSON.stringify(dependencies)
+          previousParsedConfiguration &&
+          JSON.stringify(previousParsedConfiguration.fileNames) !==
+            JSON.stringify(parsedConfiguration.fileNames)
         ) {
-          // dependencies changed - we need to recompute artifacts
+          // root files changed - we need to recompute dependencies and artifacts
+          dependencies = getDependencies();
           artifacts = getArtifacts();
           shouldUpdateRootFiles = true;
         }
@@ -372,7 +377,7 @@ function createTypeScriptReporter(configuration: TypeScriptReporterConfiguration
                 undefined,
                 (builderProgram) => {
                   const projectName = getProjectNameOfBuilderProgram(builderProgram);
-                  const diagnostics = getDiagnosticsOfBuilderProgram(builderProgram);
+                  const diagnostics = getDiagnosticsOfProgram(builderProgram);
 
                   // update diagnostics
                   diagnosticsPerProject.set(projectName, diagnostics);
@@ -405,7 +410,7 @@ function createTypeScriptReporter(configuration: TypeScriptReporterConfiguration
               solutionBuilder.build();
               performance.markEnd('Build Solutions');
             }
-          } else {
+          } else if (watching) {
             // watch compiler case
             // ensure watch compiler host exists
             if (!watchCompilerHost) {
@@ -438,7 +443,7 @@ function createTypeScriptReporter(configuration: TypeScriptReporterConfiguration
                 undefined,
                 (builderProgram) => {
                   const projectName = getProjectNameOfBuilderProgram(builderProgram);
-                  const diagnostics = getDiagnosticsOfBuilderProgram(builderProgram);
+                  const diagnostics = getDiagnosticsOfProgram(builderProgram);
 
                   // update diagnostics
                   diagnosticsPerProject.set(projectName, diagnostics);
@@ -466,6 +471,28 @@ function createTypeScriptReporter(configuration: TypeScriptReporterConfiguration
               watchProgram.updateRootFileNames(dependencies.files);
               shouldUpdateRootFiles = false;
             }
+          } else {
+            if (!compilerHost) {
+              compilerHost = createControlledCompilerHost(
+                typescript,
+                parsedConfiguration,
+                system,
+                extensions
+              );
+            }
+            if (!program) {
+              program = ts.createProgram({
+                rootNames: parsedConfiguration.fileNames,
+                options: parsedConfiguration.options,
+                projectReferences: parsedConfiguration.projectReferences,
+                host: compilerHost,
+              });
+            }
+            const diagnostics = getDiagnosticsOfProgram(program);
+            const projectName = getConfigFilePathFromCompilerOptions(program.getCompilerOptions());
+
+            // update diagnostics
+            diagnosticsPerProject.set(projectName, diagnostics);
           }
 
           changedFiles.forEach((changedFile) => {

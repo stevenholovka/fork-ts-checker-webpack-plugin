@@ -72,7 +72,11 @@
     "minimatch": "^3.0.4",
     "schema-utils": "2.7.0",
     "semver": "^7.3.2",
-    "tapable": "^1.0.0"
+    "tapable": "^2.0.0"
+  },
+  "peerDependencies": {
+    "webpack": "^5.11.0",
+    "typescript": ">3.6.0"
   },
   "devDependencies": {
     "@commitlint/config-conventional": "^11.0.0",
@@ -83,7 +87,6 @@
     "@semantic-release/release-notes-generator": "^9.0.1",
     "@types/babel__code-frame": "^7.0.2",
     "@types/cross-spawn": "^6.0.2",
-    "@types/eslint": "^7.2.4",
     "@types/fs-extra": "^9.0.2",
     "@types/jest": "^26.0.14",
     "@types/minimatch": "^3.0.1",
@@ -91,7 +94,6 @@
     "@types/node": "^14.11.10",
     "@types/rimraf": "^3.0.0",
     "@types/semver": "^7.3.4",
-    "@types/webpack": "^4.41.22",
     "@typescript-eslint/eslint-plugin": "^2.27.0",
     "@typescript-eslint/parser": "^2.27.0",
     "commitlint": "^11.0.0",
@@ -106,6 +108,7 @@
     "jest": "^26.5.3",
     "jest-circus": "^26.5.3",
     "jest-environment-node": "^26.5.2",
+    "karton": "^0.4.1",
     "lint-staged": "^10.4.2",
     "mock-fs": "^4.13.0",
     "prettier": "^2.1.2",
@@ -115,7 +118,7 @@
     "tree-kill": "^1.2.2",
     "ts-jest": "^26.4.1",
     "typescript": "^3.8.3",
-    "webpack": "^4.42.1"
+    "webpack": "^5.11.0"
   },
   "engines": {
     "node": ">=10",

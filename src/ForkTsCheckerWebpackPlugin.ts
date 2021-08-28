@@ -12,8 +12,6 @@ import { createForkTsCheckerWebpackPluginState } from './ForkTsCheckerWebpackPlu
 import { composeReporterRpcClients, createAggregatedReporter, ReporterRpcClient } from './reporter';
 import { assertTypeScriptSupport } from './typescript-reporter/TypeScriptSupport';
 import { createTypeScriptReporterRpcClient } from './typescript-reporter/reporter/TypeScriptReporterRpcClient';
-import { assertEsLintSupport } from './eslint-reporter/assertEsLintSupport';
-import { createEsLintReporterRpcClient } from './eslint-reporter/reporter/EsLintReporterRpcClient';
 import { tapStartToConnectAndRunReporter } from './hooks/tapStartToConnectAndRunReporter';
 import { tapStopToDisconnectReporter } from './hooks/tapStopToDisconnectReporter';
 import { tapAfterCompileToAddDependencies } from './hooks/tapAfterCompileToAddDependencies';
@@ -23,24 +21,15 @@ import { tapAfterEnvironmentToPatchWatching } from './hooks/tapAfterEnvironmentT
 import { createPool, Pool } from './utils/async/pool';
 import os from 'os';
 
-class ForkTsCheckerWebpackPlugin implements webpack.Plugin {
+class ForkTsCheckerWebpackPlugin {
   /**
    * Current version of the plugin
    */
   static readonly version: string = '{{VERSION}}'; // will be replaced by the @semantic-release/exec
   /**
-   * Default pools for the plugin concurrency limit
+   * Default pool for the plugin concurrency limit
    */
-  static readonly issuesPool: Pool = createPool(Math.max(1, os.cpus().length));
-  static readonly dependenciesPool: Pool = createPool(Math.max(1, os.cpus().length));
-
-  /**
-   * @deprecated Use ForkTsCheckerWebpackPlugin.issuesPool instead
-   */
-  static get pool(): Pool {
-    // for backward compatibility
-    return ForkTsCheckerWebpackPlugin.issuesPool;
-  }
+  static readonly pool: Pool = createPool(Math.max(1, os.cpus().length));
 
   private readonly options: ForkTsCheckerWebpackPluginOptions;
 
@@ -65,37 +54,20 @@ class ForkTsCheckerWebpackPlugin implements webpack.Plugin {
   apply(compiler: webpack.Compiler) {
     const configuration = createForkTsCheckerWebpackPluginConfiguration(compiler, this.options);
     const state = createForkTsCheckerWebpackPluginState();
-    const issuesReporters: ReporterRpcClient[] = [];
-    const dependenciesReporters: ReporterRpcClient[] = [];
+    const reporters: ReporterRpcClient[] = [];
 
     if (configuration.typescript.enabled) {
       assertTypeScriptSupport(configuration.typescript);
-      issuesReporters.push(createTypeScriptReporterRpcClient(configuration.typescript));
-      dependenciesReporters.push(createTypeScriptReporterRpcClient(configuration.typescript));
+      reporters.push(createTypeScriptReporterRpcClient(configuration.typescript));
     }
 
-    if (configuration.eslint.enabled) {
-      assertEsLintSupport(configuration.eslint);
-      issuesReporters.push(createEsLintReporterRpcClient(configuration.eslint));
-      dependenciesReporters.push(createEsLintReporterRpcClient(configuration.eslint));
-    }
-
-    if (issuesReporters.length) {
-      const issuesReporter = createAggregatedReporter(composeReporterRpcClients(issuesReporters));
-      const dependenciesReporter = createAggregatedReporter(
-        composeReporterRpcClients(dependenciesReporters)
-      );
+    if (reporters.length) {
+      const reporter = createAggregatedReporter(composeReporterRpcClients(reporters));
 
       tapAfterEnvironmentToPatchWatching(compiler, state);
-      tapStartToConnectAndRunReporter(
-        compiler,
-        issuesReporter,
-        dependenciesReporter,
-        configuration,
-        state
-      );
+      tapStartToConnectAndRunReporter(compiler, reporter, configuration, state);
       tapAfterCompileToAddDependencies(compiler, configuration, state);
-      tapStopToDisconnectReporter(compiler, issuesReporter, dependenciesReporter, state);
+      tapStopToDisconnectReporter(compiler, reporter, state);
       tapErrorToLogMessage(compiler, configuration);
     } else {
       throw new Error(

@@ -12,8 +12,7 @@ import { ForkTsCheckerWebpackPlugin } from '../ForkTsCheckerWebpackPlugin';
 
 function tapStartToConnectAndRunReporter(
   compiler: webpack.Compiler,
-  issuesReporter: ReporterRpcClient,
-  dependenciesReporter: ReporterRpcClient,
+  reporter: ReporterRpcClient,
   configuration: ForkTsCheckerWebpackPluginConfiguration,
   state: ForkTsCheckerWebpackPluginState
 ) {
@@ -53,7 +52,7 @@ function tapStartToConnectAndRunReporter(
     if (state.watching) {
       change = getFilesChange(compiler);
 
-      configuration.logger.infrastructure.info(
+      configuration.logger.infrastructure.log(
         [
           'Calling reporter service for incremental check.',
           `  Changed files: ${JSON.stringify(change.changedFiles)}`,
@@ -61,74 +60,47 @@ function tapStartToConnectAndRunReporter(
         ].join('\n')
       );
     } else {
-      configuration.logger.infrastructure.info('Calling reporter service for single check.');
+      configuration.logger.infrastructure.log('Calling reporter service for single check.');
     }
 
     let resolveDependencies: (dependencies: FilesMatch | undefined) => void;
-    let rejectDependencies: (error: Error) => void;
+    let rejectedDependencies: (error: Error) => void;
     let resolveIssues: (issues: Issue[] | undefined) => void;
     let rejectIssues: (error: Error) => void;
 
     state.dependenciesPromise = new Promise((resolve, reject) => {
       resolveDependencies = resolve;
-      rejectDependencies = reject;
+      rejectedDependencies = reject;
     });
     state.issuesPromise = new Promise((resolve, reject) => {
       resolveIssues = resolve;
       rejectIssues = reject;
     });
-    const previousIssuesReportPromise = state.issuesReportPromise;
-    const previousDependenciesReportPromise = state.dependenciesReportPromise;
-
-    change = await hooks.start.promise(change, compilation);
-
-    state.issuesReportPromise = ForkTsCheckerWebpackPlugin.issuesPool.submit(
+    const previousReportPromise = state.reportPromise;
+    state.reportPromise = ForkTsCheckerWebpackPlugin.pool.submit(
       (done) =>
         new Promise(async (resolve) => {
-          try {
-            await issuesReporter.connect();
+          change = await hooks.start.promise(change, compilation);
 
-            const previousReport = await previousIssuesReportPromise;
+          try {
+            await reporter.connect();
+
+            const previousReport = await previousReportPromise;
             if (previousReport) {
               await previousReport.close();
             }
 
-            const report = await issuesReporter.getReport(change);
-            resolve(report);
-
-            report.getIssues().then(resolveIssues).catch(rejectIssues).finally(done);
-          } catch (error) {
-            if (error instanceof OperationCanceledError) {
-              hooks.canceled.call(compilation);
-            } else {
-              hooks.error.call(error, compilation);
-            }
-
-            resolve(undefined);
-            resolveIssues(undefined);
-            done();
-          }
-        })
-    );
-    state.dependenciesReportPromise = ForkTsCheckerWebpackPlugin.dependenciesPool.submit(
-      (done) =>
-        new Promise(async (resolve) => {
-          try {
-            await dependenciesReporter.connect();
-
-            const previousReport = await previousDependenciesReportPromise;
-            if (previousReport) {
-              await previousReport.close();
-            }
-
-            const report = await dependenciesReporter.getReport(change);
+            const report = await reporter.getReport(change, state.watching);
             resolve(report);
 
             report
               .getDependencies()
               .then(resolveDependencies)
-              .catch(rejectDependencies)
-              .finally(done);
+              .catch(rejectedDependencies)
+              .finally(() => {
+                // get issues after dependencies are resolved as it can be blocking
+                report.getIssues().then(resolveIssues).catch(rejectIssues).finally(done);
+              });
           } catch (error) {
             if (error instanceof OperationCanceledError) {
               hooks.canceled.call(compilation);
@@ -138,6 +110,7 @@ function tapStartToConnectAndRunReporter(
 
             resolve(undefined);
             resolveDependencies(undefined);
+            resolveIssues(undefined);
             done();
           }
         })

@@ -5,7 +5,6 @@ import { createBasicFormatter, createWebpackFormatter, Formatter } from 'lib/for
 
 describe('formatter/WebpackFormatter', () => {
   const issue: Issue = {
-    origin: 'typescript',
     severity: 'error',
     code: 'TS123',
     message: 'Some issue content',
@@ -38,22 +37,22 @@ describe('formatter/WebpackFormatter', () => {
   });
 
   it('formats issue file', () => {
-    expect(formatter(issue)).toContain(`some/file.ts`);
+    expect(formatter(issue)).toContain(`./some/file.ts`);
   });
 
   it('formats location', () => {
-    expect(formatter(issue)).toContain(':1:7');
+    expect(formatter(issue)).toContain(' 1:7-16');
     expect(
       formatter({
         ...issue,
         location: { start: { line: 1, column: 7 }, end: { line: 10, column: 16 } },
       })
-    ).toContain(':1:7');
+    ).toContain(' 1:7-10:16');
   });
 
   it('formats issue header like webpack', () => {
     expect(formatter(issue)).toEqual(
-      [`ERROR in some/file.ts:1:7`, 'TS123: Some issue content', ''].join(os.EOL)
+      [`ERROR in ./some/file.ts 1:7-16`, 'TS123: Some issue content', ''].join(os.EOL)
     );
   });
 });

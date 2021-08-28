@@ -1,5 +1,5 @@
-import type * as ts from 'typescript';
-import { dirname, join } from 'path';
+import * as ts from 'typescript';
+import { dirname } from 'path';
 import { createPassiveFileSystem } from '../file-system/PassiveFileSystem';
 import forwardSlash from '../../utils/path/forwardSlash';
 import { createRealFileSystem } from '../file-system/RealFileSystem';
@@ -48,7 +48,6 @@ function createControlledTypeScriptSystem(
   let artifacts: FilesMatch = {
     files: [],
     dirs: [],
-    excluded: [],
     extensions: [],
   };
   let isInitialRun = true;
@@ -104,9 +103,8 @@ function createControlledTypeScriptSystem(
 
     const fileWatcherCallbacks = fileWatcherCallbacksMap.get(normalizedPath);
     if (fileWatcherCallbacks) {
-      // typescript expects normalized paths with posix forward slash
       fileWatcherCallbacks.forEach((fileWatcherCallback) =>
-        fileWatcherCallback(forwardSlash(normalizedPath), event)
+        fileWatcherCallback(normalizedPath, event)
       );
     }
   }
@@ -122,7 +120,7 @@ function createControlledTypeScriptSystem(
     const directoryWatcherCallbacks = directoryWatcherCallbacksMap.get(directory);
     if (directoryWatcherCallbacks) {
       directoryWatcherCallbacks.forEach((directoryWatcherCallback) =>
-        directoryWatcherCallback(forwardSlash(normalizedPath))
+        directoryWatcherCallback(normalizedPath)
       );
     }
 
@@ -134,7 +132,7 @@ function createControlledTypeScriptSystem(
             forwardSlash(directory)[watchedDirectory.length] === '/')
         ) {
           recursiveDirectoryWatcherCallbacks.forEach((recursiveDirectoryWatcherCallback) =>
-            recursiveDirectoryWatcherCallback(forwardSlash(normalizedPath))
+            recursiveDirectoryWatcherCallback(normalizedPath)
           );
         }
       }
@@ -150,18 +148,11 @@ function createControlledTypeScriptSystem(
   }
 
   function getReadFileSystem(path: string) {
-    if ((mode === 'readonly' || mode === 'write-tsbuildinfo') && isArtifact(path)) {
-      if (isInitialRun && !memFileSystem.exists(path) && passiveFileSystem.exists(path)) {
-        // copy file to memory on initial run
-        const stats = passiveFileSystem.readStats(path);
-        if (stats?.isFile()) {
-          const content = passiveFileSystem.readFile(path);
-          if (content) {
-            memFileSystem.writeFile(path, content);
-            memFileSystem.updateTimes(path, stats.atime, stats.mtime);
-          }
-        }
-      }
+    if (
+      !isInitialRun &&
+      (mode === 'readonly' || mode === 'write-tsbuildinfo') &&
+      isArtifact(path)
+    ) {
       return memFileSystem;
     }
 
@@ -182,9 +173,6 @@ function createControlledTypeScriptSystem(
   const controlledSystem: ControlledTypeScriptSystem = {
     ...typescript.sys,
     useCaseSensitiveFileNames: caseSensitive,
-    realpath(path: string): string {
-      return getReadFileSystem(path).realPath(path);
-    },
     fileExists(path: string): boolean {
       const stats = getReadFileSystem(path).readStats(path);
 
@@ -209,7 +197,9 @@ function createControlledTypeScriptSystem(
       controlledSystem.invokeFileDeleted(path);
     },
     directoryExists(path: string): boolean {
-      return Boolean(getReadFileSystem(path).readStats(path)?.isDirectory());
+      const stats = getReadFileSystem(path).readStats(path);
+
+      return !!stats && stats.isDirectory();
     },
     createDirectory(path: string): void {
       getWriteFileSystem(path).createDir(path);
@@ -219,13 +209,7 @@ function createControlledTypeScriptSystem(
     getDirectories(path: string): string[] {
       const dirents = getReadFileSystem(path).readDir(path);
 
-      return dirents
-        .filter(
-          (dirent) =>
-            dirent.isDirectory() ||
-            (dirent.isSymbolicLink() && controlledSystem.directoryExists(join(path, dirent.name)))
-        )
-        .map((dirent) => dirent.name);
+      return dirents.filter((dirent) => dirent.isDirectory()).map((dirent) => dirent.name);
     },
     getModifiedTime(path: string): Date | undefined {
       const stats = getReadFileSystem(path).readStats(path);
